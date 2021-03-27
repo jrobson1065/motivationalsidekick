@@ -1,68 +1,76 @@
-from email.mime.text import MIMEText
-import requests
-from bs4 import BeautifulSoup
-import random
-from selenium import webdriver
 import time
-import base64
 import schedule
-from gmail_service import create_service
+from services.gmail_service import send_email
+from services.web_scrape_service import find_img
+from services.lang_service import rand_lang, translate, check_words
+from string import ascii_letters as letters
+from services.automation_service import post_to_fb
+from services.ocr_service import read_ss
+import os
 
-pw = base64.b64decode("YnJpdG5leTIy")
-email = "j.robson1065@gmail.com"
 
-def get_quote():
-    url = "https://www.oberlo.com/blog/motivational-quotes"
-    page = requests.get(url)
-    soup = BeautifulSoup(page.content, "html.parser")
+def quote_info(lang):
+    text = ""
+    while True:
+        text = find_img(lang)
+        text = translate(text)
+        try:
+            if len(text.split(" ")) < 1:
+                print("Text not long enough")
+                continue
+            if not any(t in letters for t in text):
+                print("No words found")
+                continue
+        except:
+            continue
+        text = check_words(text)
+        if not text:
+            continue
+        else:
+            return text
 
-    quotes = soup.select(".single-post ol li span")
-    return random.choice(quotes).text
 
-def post():
-    chrome_options = webdriver.ChromeOptions()
-    prefs = {"profile.default_content_setting_values.notifications": 2}
-    chrome_options.add_experimental_option("prefs", prefs)
-    browser = webdriver.Chrome(
-        "/Users/jstar/Downloads/chromedriver", chrome_options=chrome_options)
-    browser.get("http://mbasic.facebook.com")
-    username = browser.find_element_by_id("m_login_email")
-    password = browser.find_element_by_name("pass")
-    submit = browser.find_element_by_name("login")
-    username.send_keys(email)
-    password.send_keys(pw.decode("utf-8"))
-    submit.click()
-    submit = browser.find_element_by_xpath('//a[@target="_self"]')
-    submit.click()
-    post_box = browser.find_element_by_name("xc_message")
-    post_box.send_keys(quote)
-    post_box = browser.find_element_by_name("view_post")
-    post_box.click()
+def verify_screenshot(quote):
+    quote = quote.split(" ")
+    text = read_ss()
+    if not text:
+        print("Error: Cannot find screenshot.")
+    text = "".join(text)
+    text = text.replace("\n", " ")
+    text = text.split(" ")
+    check = sum(w in text for w in quote)
 
-    browser.quit()
-    
-def create_message(sender, to, subject, message_text):
-    message = MIMEText(message_text)
-    message["to"] = to
-    message["from"] = sender
-    message["subject"] = subject
-    return {"raw": base64.urlsafe_b64encode(message.as_string().encode()).decode()}
-    
-def send_message(service, user_id, message):
-        message = (service.users().messages().send(userId=user_id, body=message)
-                .execute())
-        return message
+    confidence = check / len(quote) * 100
+    if confidence > 80:
+        return True
+    return False
 
-quote = get_quote()
+def remove_previous_ss():
+    try:
+        if os.path.exists("temp-ss.png"):
+            os.remove("temp-ss.png")
+    except:
+        print("temp-img not found in local directory")
 
-def run():
-    post()
-    email_msg = create_message(email, email, "Daily Motivational Quote", quote)
-    service = create_service()
-    send_message(service, "me", email_msg)
 
-schedule.every().day.at("9:00").do(run)
+def main():
+    lang = rand_lang()
+    quote = quote_info(lang)
+    quote = "Translation: {} with {}% confidence. Provided by automated Python application written by John Robson.".format(
+        quote[0], quote[1])
 
-while 1:
-    schedule.run_pending()
-    time.sleep(1)
+    remove_previous_ss()
+    url = post_to_fb(quote)
+    check = verify_screenshot(quote)
+    if check:
+        img = "/Users/jstar/motivationalsidekick/temp-ss.png"
+        send_email(img, url)
+
+
+if __name__ == "__main__":
+    main()
+    # schedule.every().day.at("9:00").do(main)
+
+    # while True:
+    #   schedule.run_pending()
+    #   time.sleep(1)
